@@ -1,0 +1,31 @@
+# Environment files
+.env
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Backups / dumps
+*.dump
+*.sql
+*.tar
+*.gz
+backups/
+
+# Terraform future
+.terraform/
+*.tfstate
+*.tfstate.*
