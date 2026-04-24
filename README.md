@@ -395,21 +395,6 @@ All targets should be in the `UP` state.
 
 ## Screenshots
 
-Recommended screenshots for documentation:
-
-```text
-diagrams/hyper-v-vms.png
-diagrams/api-health.png
-diagrams/api-notes.png
-diagrams/prometheus-targets.png
-diagrams/grafana-dashboard.png
-```
-
-Suggested README section after adding screenshots:
-
-```markdown
-## Screenshots
-
 ### Hyper-V Virtual Machines
 
 ![Hyper-V VMs](diagrams/hyper-v-vms.png)
@@ -429,7 +414,7 @@ Suggested README section after adding screenshots:
 ### Grafana Dashboard
 
 ![Grafana Dashboard](diagrams/grafana-dashboard.png)
-```
+
 
 ---
 
