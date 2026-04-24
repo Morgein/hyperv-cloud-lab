@@ -10,20 +10,19 @@ The main goal is to practice core Cloud Engineering and DevOps skills without us
 
 ## Architecture
 
-The lab runs on a Windows 11 Hyper-V host. Four Ubuntu Server virtual machines are connected through a private Hyper-V NAT network.
+The lab runs on a Windows 11 Hyper-V host. Several Ubuntu Server virtual machines are connected through the local lab network `192.168.0.0/24`.
 
 ```text
 Windows 11 / Hyper-V Host
         |
-        | NAT Internal Switch: cloud-lab-switch
-        | Network: 10.10.10.0/24
-        | Host Gateway: 10.10.10.1
+        | Hyper-V Virtual Network
+        | Network: 192.168.0.0/24
         |
 -----------------------------------------------------
 |              |              |                     |
-proxy-vm       app-vm         db-vm                 monitoring-vm
-10.10.10.10    10.10.10.20    10.10.10.30           10.10.10.40
-Nginx          Docker App     PostgreSQL            Prometheus + Grafana
+app-vm         proxy-vm       db-vm                 monitoring-vm
+192.168.0.110  192.168.0.111  192.168.0.112         192.168.0.113
+Docker + API   Nginx Proxy    PostgreSQL            Prometheus + Grafana
 ```
 
 ---
@@ -36,10 +35,13 @@ Windows browser / PowerShell
 http://cloudlab.local
    ↓
 proxy-vm / Nginx reverse proxy
+192.168.0.111
    ↓
 app-vm / Dockerized FastAPI application
+192.168.0.110
    ↓
 db-vm / PostgreSQL database
+192.168.0.112
 ```
 
 ---
@@ -48,10 +50,10 @@ db-vm / PostgreSQL database
 
 | VM | IP Address | Role |
 |---|---:|---|
-| proxy-vm | 10.10.10.10 | Nginx reverse proxy |
-| app-vm | 10.10.10.20 | Dockerized FastAPI application |
-| db-vm | 10.10.10.30 | PostgreSQL database server |
-| monitoring-vm | 10.10.10.40 | Prometheus and Grafana server |
+| app-vm | 192.168.0.110 | Dockerized FastAPI application |
+| proxy-vm | 192.168.0.111 | Nginx reverse proxy |
+| db-vm | 192.168.0.112 | PostgreSQL database server |
+| monitoring-vm | 192.168.0.113 | Prometheus and Grafana server |
 
 ---
 
@@ -110,6 +112,18 @@ hyperv-cloud-lab/
 
 The application is a small FastAPI service connected to a PostgreSQL database.
 
+The API runs on:
+
+```text
+192.168.0.110:8080
+```
+
+The application is not accessed directly by the user. User requests go through the Nginx reverse proxy on:
+
+```text
+192.168.0.111
+```
+
 ### Endpoints
 
 | Method | Endpoint | Description |
@@ -144,7 +158,35 @@ curl.exe http://cloudlab.local/notes
 Expected request path:
 
 ```text
-Windows Host → Nginx Reverse Proxy → FastAPI Container → PostgreSQL VM
+Windows Host
+   ↓
+Nginx Reverse Proxy / 192.168.0.111
+   ↓
+FastAPI Container / 192.168.0.110:8080
+   ↓
+PostgreSQL VM / 192.168.0.112:5432
+```
+
+---
+
+## Nginx Reverse Proxy
+
+Nginx runs on:
+
+```text
+proxy-vm: 192.168.0.111
+```
+
+It forwards HTTP requests to the API server:
+
+```text
+http://192.168.0.110:8080
+```
+
+The local domain `cloudlab.local` points to the proxy VM:
+
+```text
+192.168.0.111 cloudlab.local
 ```
 
 ---
@@ -157,30 +199,30 @@ The lab uses basic network segmentation with UFW firewall rules.
 
 Allowed:
 
-- SSH from lab network
-- HTTP port 80 from lab network
+- SSH from the lab network
+- HTTP port 80 from the lab network
 
 ### app-vm
 
 Allowed:
 
-- SSH from lab network
-- Application port 8080 only from proxy-vm
+- SSH from the lab network
+- Application port 8080 only from proxy-vm `192.168.0.111`
 
 ### db-vm
 
 Allowed:
 
-- SSH from lab network
-- PostgreSQL port 5432 only from app-vm
+- SSH from the lab network
+- PostgreSQL port 5432 only from app-vm `192.168.0.110`
 
 ### monitoring-vm
 
 Allowed:
 
-- SSH from lab network
-- Grafana port 3000 from lab network
-- Prometheus port 9090 from lab network
+- SSH from the lab network
+- Grafana port 3000 from the lab network
+- Prometheus port 9090 from the lab network
 
 ### Secrets
 
@@ -195,7 +237,7 @@ app/.env.example
 Example:
 
 ```env
-DATABASE_URL=postgresql://cloudlab_user:CHANGE_ME@10.10.10.30:5432/cloudlab_app
+DATABASE_URL=postgresql://cloudlab_user:CHANGE_ME@192.168.0.112:5432/cloudlab_app
 ```
 
 ---
@@ -205,13 +247,13 @@ DATABASE_URL=postgresql://cloudlab_user:CHANGE_ME@10.10.10.30:5432/cloudlab_app
 PostgreSQL runs on a separate virtual machine:
 
 ```text
-db-vm: 10.10.10.30
+db-vm: 192.168.0.112
 ```
 
 The database accepts connections only from:
 
 ```text
-app-vm: 10.10.10.20
+app-vm: 192.168.0.110
 ```
 
 PostgreSQL access is controlled through:
@@ -220,6 +262,12 @@ PostgreSQL access is controlled through:
 postgresql.conf
 pg_hba.conf
 UFW firewall rules
+```
+
+Expected PostgreSQL listening address:
+
+```text
+192.168.0.112:5432
 ```
 
 ---
@@ -232,21 +280,21 @@ Monitoring is implemented with Prometheus, Grafana and Node Exporter.
 
 | Target | Role |
 |---|---|
-| 10.10.10.10:9100 | proxy-vm |
-| 10.10.10.20:9100 | app-vm |
-| 10.10.10.30:9100 | db-vm |
-| 10.10.10.40:9100 | monitoring-vm |
+| 192.168.0.110:9100 | app-vm |
+| 192.168.0.111:9100 | proxy-vm |
+| 192.168.0.112:9100 | db-vm |
+| 192.168.0.113:9100 | monitoring-vm |
 
 Prometheus is available inside the lab network:
 
 ```text
-http://10.10.10.40:9090
+http://192.168.0.113:9090
 ```
 
 Grafana is available inside the lab network:
 
 ```text
-http://10.10.10.40:3000
+http://192.168.0.113:3000
 ```
 
 Grafana uses Prometheus as a datasource:
@@ -288,7 +336,10 @@ The backup process creates compressed PostgreSQL dump files and keeps only recen
 ### Check VM connectivity
 
 ```bash
-ping 10.10.10.1
+ping 192.168.0.110
+ping 192.168.0.111
+ping 192.168.0.112
+ping 192.168.0.113
 ping 1.1.1.1
 ping google.com
 ```
@@ -299,6 +350,7 @@ ping google.com
 sudo nginx -t
 sudo systemctl status nginx
 sudo journalctl -u nginx -xe
+curl http://192.168.0.110:8080/health
 ```
 
 ### Check Docker application
@@ -307,6 +359,7 @@ sudo journalctl -u nginx -xe
 docker ps
 docker logs cloudlab-api
 curl http://localhost:8080/health
+curl http://192.168.0.110:8080/health
 ```
 
 ### Check PostgreSQL
@@ -314,6 +367,12 @@ curl http://localhost:8080/health
 ```bash
 sudo systemctl status postgresql
 sudo ss -lntp | grep 5432
+```
+
+Expected result:
+
+```text
+192.168.0.112:5432
 ```
 
 ### Check firewall
@@ -327,7 +386,7 @@ sudo ufw status verbose
 Open:
 
 ```text
-http://10.10.10.40:9090/targets
+http://192.168.0.113:9090/targets
 ```
 
 All targets should be in the `UP` state.
@@ -359,6 +418,10 @@ Suggested README section after adding screenshots:
 
 ![API Health](diagrams/api-health.png)
 
+### API Notes Endpoint
+
+![API Notes](diagrams/api-notes.png)
+
 ### Prometheus Targets
 
 ![Prometheus Targets](diagrams/prometheus-targets.png)
@@ -375,7 +438,7 @@ Suggested README section after adding screenshots:
 During this project, I practiced:
 
 - Hyper-V virtual networking
-- NAT-based private infrastructure
+- Local cloud-like infrastructure design
 - Static IP configuration with Netplan
 - Linux server administration
 - Nginx reverse proxy configuration
