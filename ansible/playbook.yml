@@ -1,0 +1,58 @@
+---
+- name: Commmon setup for all CloudLab VMs
+  hosts: all
+  become: true
+
+  vars:
+    lab_network: "192.168.0.0/24"
+    monitoring_ip: "192.168.0.113"
+
+  tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install common packages
+      ansible.builtin.apt:
+        name:
+          - curl
+          - wget
+          - git
+          - vim
+          - htop
+          - net-tools
+          - unzip
+          - ca-certificates
+          - gnupg
+          - ufw
+          - prometheus-node-exporter
+        state: present
+
+    - name: Allow SSH from lab network
+      community.general.ufw:
+        rule: allow
+        from_ip: "{{ lab_network }}"
+        port: "22"
+        proto: tcp
+
+    - name: Allow Nodeexporter from monitoring VM
+      community.general.ufw:
+        rule: allow
+        from_ip: "{{ monitoring_ip }}"
+        port: "9100"
+        proto: tcp
+    
+    - name: Set UFW default incoming policy to deny
+      community.general.ufw:
+        direction: incoming
+        policy: deny
+
+    - name: Set UFW default outgoing policy to allow
+      community.general.ufw:
+        direction: outgoing
+        policy: allow
+
+    - name: Enable UFW
+      community.general.ufw:
+        state: enabled
