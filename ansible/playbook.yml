@@ -6,6 +6,8 @@
   vars:
     lab_network: "192.168.0.0/24"
     monitoring_ip: "192.168.0.113"
+    app_ip: "192.168.0.110"
+    proxy_ip: "192.168.0.111"
 
   tasks:
     - name: Update apt cache
@@ -56,3 +58,74 @@
     - name: Enable UFW
       community.general.ufw:
         state: enabled
+
+- name: Configure Nginx reverse proxy
+  hosts: proxy
+  become: true
+
+
+  vars:
+    lab_network: "192.168.0.0/24"
+    app_ip: "192.168.0.110"
+
+  handlers:
+    - name: Restart nginx
+      ansible.builtin.systemd:
+        name: nginx
+        state: restarted
+
+  tasks:
+    - name: Install Nginx
+      ansible.builtin.apt:
+        name:
+          - nginx
+          - fail2ban
+        state: present
+        update_cache: true
+    
+    
+    - name: Deploy Cloudlab Nginx config
+      ansible.builtin.template:
+        src: templates/cloudlab.conf.j2
+        dest: /etc/nginx/sites-available/cloudlab
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart Nginx
+
+    - name: Remove default Nginx site
+      ansible.builtin.file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+      notify: Restart nginx
+
+    - name: Enable CloudLab Nginx site
+      ansible.builtin.file:
+        src: /etc/nginx/sites-available/cloudlab
+        dest: /etc/nginx/sites-enabled/cloudlab
+        state: link
+      notify: Restart nginx
+
+    - name: Test Nginx configuration
+      ansible.builtin.command: nginx -t
+      changed_when: false
+
+    - name: Enable and start Nginx
+      ansible.builtin.systemd:
+        name: nginx
+        enabled: true
+        state: started
+
+    - name: Enabble and start Fail2ban
+      ansible.builtin.systemd:
+        name: fail2ban
+        enabled: true
+        state: started
+
+    - name: Allow HTTP from lab network
+      community.general.ufw:
+        rule: allow
+        from_ip: "{{ lab_network }}"
+        port: "80"
+        proto: tcp
+
