@@ -139,7 +139,7 @@
     db_ip: "192.168.0.112"
     postgres_db: "cloudlab_app"
     postgres_user: "cloudlab_user"
-    postgres_password: "Change"
+    postgres_password: "{{ vault_postgres_password }}"
     app_dir: "/opt/cloudlab-app"
 
   tasks:
