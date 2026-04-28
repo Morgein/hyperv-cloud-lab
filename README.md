@@ -2,7 +2,7 @@
 
 ## Goal
 
-This project demonstrates a production-like local cloud infrastructure built with Hyper-V, Ubuntu Server, Nginx, Docker, PostgreSQL, Prometheus, Grafana, UFW firewall rules and backup automation.
+This project demonstrates a production-like local cloud infrastructure built with Hyper-V, Ubuntu Server, Nginx, Docker, FastAPI, PostgreSQL, Prometheus, Grafana, UFW firewall rules and Ansible automation.
 
 The main goal is to practice core Cloud Engineering and DevOps skills without using paid cloud resources.
 
@@ -61,7 +61,6 @@ db-vm / PostgreSQL database
 
 - Hyper-V
 - Ubuntu Server
-- Netplan
 - Nginx
 - Docker
 - Docker Compose
@@ -72,7 +71,8 @@ db-vm / PostgreSQL database
 - Prometheus
 - Grafana
 - Node Exporter
-- systemd timers
+- Ansible
+- Ansible Vault
 - PowerShell
 - SSH / SCP
 
@@ -89,11 +89,20 @@ hyperv-cloud-lab/
 │   ├── Dockerfile
 │   ├── docker-compose.yml
 │   └── .env.example
+├── ansible/
+│   ├── inventory.ini
+│   ├── playbook.yml
+│   ├── group_vars/
+│   │   └── all/
+│   │       ├── vars.yml
+│   │       └── vault.example.yml
+│   └── templates/
+│       └── cloudlab.conf.j2
 ├── nginx/
 │   └── cloudlab.conf
 ├── monitoring/
 │   ├── prometheus.yml
-│   └── docker-compose.monitoring.yml
+│   └── docker-compose.yml
 ├── scripts/
 │   ├── backup-postgres.sh
 │   └── restore-postgres.sh
@@ -103,7 +112,12 @@ hyperv-cloud-lab/
 │   ├── monitoring.md
 │   └── troubleshooting.md
 └── diagrams/
-    └── architecture.md
+    ├── architecture.md
+    ├── hyper-v-vms.png
+    ├── api-health.png
+    ├── api-notes.png
+    ├── prometheus-targets.png
+    └── grafana-dashboard.png
 ```
 
 ---
@@ -155,18 +169,6 @@ List notes:
 curl.exe http://cloudlab.local/notes
 ```
 
-Expected request path:
-
-```text
-Windows Host
-   ↓
-Nginx Reverse Proxy / 192.168.0.111
-   ↓
-FastAPI Container / 192.168.0.110:8080
-   ↓
-PostgreSQL VM / 192.168.0.112:5432
-```
-
 ---
 
 ## Nginx Reverse Proxy
@@ -187,6 +189,91 @@ The local domain `cloudlab.local` points to the proxy VM:
 
 ```text
 192.168.0.111 cloudlab.local
+```
+
+---
+
+## Ansible Automation
+
+The infrastructure is automated with Ansible.
+
+The playbook automates:
+
+- common package installation
+- Node Exporter installation
+- UFW firewall rules
+- Nginx reverse proxy configuration
+- Docker installation
+- FastAPI application deployment with Docker Compose
+- PostgreSQL installation and configuration
+- PostgreSQL user and database creation
+- Prometheus and Grafana deployment
+- cleanup of old containers and stale port conflicts
+
+### Inventory
+
+```ini
+[api]
+api-vm ansible_host=192.168.0.110
+
+[proxy]
+proxy-vm ansible_host=192.168.0.111
+
+[database]
+db-vm ansible_host=192.168.0.112
+
+[monitoring]
+monitoring-vm ansible_host=192.168.0.113
+```
+
+### Run the Playbook
+
+From the `ansible/` directory:
+
+```bash
+ansible-playbook -i inventory.ini playbook.yml --ask-become-pass --ask-vault-pass
+```
+
+Run only one group:
+
+```bash
+ansible-playbook -i inventory.ini playbook.yml --limit api --ask-become-pass --ask-vault-pass
+ansible-playbook -i inventory.ini playbook.yml --limit proxy --ask-become-pass --ask-vault-pass
+ansible-playbook -i inventory.ini playbook.yml --limit database --ask-become-pass --ask-vault-pass
+ansible-playbook -i inventory.ini playbook.yml --limit monitoring --ask-become-pass --ask-vault-pass
+```
+
+---
+
+## Secrets Management
+
+PostgreSQL credentials are managed with Ansible Vault.
+
+The real vault file is not committed to Git.
+
+Example file:
+
+```text
+ansible/group_vars/all/vault.example.yml
+```
+
+Expected variable:
+
+```yaml
+vault_postgres_password: "CHANGE"
+```
+
+Create a real vault file:
+
+```bash
+cp ansible/group_vars/all/vault.example.yml ansible/group_vars/all/vault.yml
+ansible-vault encrypt ansible/group_vars/all/vault.yml
+```
+
+Edit it later:
+
+```bash
+ansible-vault edit ansible/group_vars/all/vault.yml
 ```
 
 ---
@@ -221,24 +308,9 @@ Allowed:
 Allowed:
 
 - SSH from the lab network
-- Grafana port 3000 from the lab network
 - Prometheus port 9090 from the lab network
-
-### Secrets
-
-Real credentials are stored in `.env` files and are not committed to Git.
-
-The repository contains only:
-
-```text
-app/.env.example
-```
-
-Example:
-
-```env
-DATABASE_URL=postgresql://cloudlab_user:CHANGE_ME@192.168.0.112:5432/cloudlab_app
-```
+- Grafana port 3000 from the lab network
+- Node Exporter port 9100 from the lab network
 
 ---
 
@@ -256,13 +328,15 @@ The database accepts connections only from:
 app-vm: 192.168.0.110
 ```
 
-PostgreSQL access is controlled through:
+PostgreSQL is configured by Ansible:
 
-```text
-postgresql.conf
-pg_hba.conf
-UFW firewall rules
-```
+- PostgreSQL installation
+- `listen_addresses`
+- `pg_hba.conf`
+- database creation
+- user creation
+- privileges
+- firewall rule for port `5432`
 
 Expected PostgreSQL listening address:
 
@@ -275,6 +349,12 @@ Expected PostgreSQL listening address:
 ## Monitoring
 
 Monitoring is implemented with Prometheus, Grafana and Node Exporter.
+
+The monitoring stack is deployed by Ansible on:
+
+```text
+monitoring-vm: 192.168.0.113
+```
 
 ### Prometheus Targets
 
@@ -327,8 +407,6 @@ Backups are scheduled with a systemd timer:
 cloudlab-db-backup.timer
 ```
 
-The backup process creates compressed PostgreSQL dump files and keeps only recent backups.
-
 ---
 
 ## Basic Verification Commands
@@ -340,8 +418,6 @@ ping 192.168.0.110
 ping 192.168.0.111
 ping 192.168.0.112
 ping 192.168.0.113
-ping 1.1.1.1
-ping google.com
 ```
 
 ### Check Nginx
@@ -349,7 +425,6 @@ ping google.com
 ```bash
 sudo nginx -t
 sudo systemctl status nginx
-sudo journalctl -u nginx -xe
 curl http://192.168.0.110:8080/health
 ```
 
@@ -367,18 +442,6 @@ curl http://192.168.0.110:8080/health
 ```bash
 sudo systemctl status postgresql
 sudo ss -lntp | grep 5432
-```
-
-Expected result:
-
-```text
-192.168.0.112:5432
-```
-
-### Check firewall
-
-```bash
-sudo ufw status verbose
 ```
 
 ### Check Prometheus targets
@@ -415,7 +478,6 @@ All targets should be in the `UP` state.
 
 ![Grafana Dashboard](diagrams/grafana-dashboard.png)
 
-
 ---
 
 ## What I Learned
@@ -423,16 +485,16 @@ All targets should be in the `UP` state.
 During this project, I practiced:
 
 - Hyper-V virtual networking
-- Local cloud-like infrastructure design
-- Static IP configuration with Netplan
 - Linux server administration
 - Nginx reverse proxy configuration
 - Dockerized application deployment
 - PostgreSQL remote access configuration
-- Firewall segmentation with UFW
-- Monitoring with Prometheus and Grafana
-- Database backup and restore automation
-- Basic production-like infrastructure documentation
+- firewall segmentation with UFW
+- monitoring with Prometheus and Grafana
+- infrastructure automation with Ansible
+- secrets management with Ansible Vault
+- troubleshooting Docker port conflicts and stale `docker-proxy` processes
+- production-like infrastructure documentation
 
 ---
 
@@ -440,11 +502,9 @@ During this project, I practiced:
 
 Possible next steps:
 
-- Add Ansible provisioning
 - Add GitLab CI/CD deployment
 - Add HTTPS with a local certificate authority
 - Add Alertmanager
 - Add PostgreSQL exporter
 - Add Docker container monitoring with cAdvisor
 - Rebuild the same architecture in Microsoft Azure using Terraform
-- Add infrastructure diagrams and screenshots
