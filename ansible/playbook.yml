@@ -41,7 +41,7 @@
     - name: Allow Nodeexporter from monitoring VM
       community.general.ufw:
         rule: allow
-        from_ip: "{{ monitoring_ip }}"
+        from_ip: "{{ lab_network }}"
         port: "9100"
         proto: tcp
     
@@ -214,18 +214,41 @@
 
     - name: Stop old Docker Compose application from previous manual deployment
       ansible.builtin.command:
-          cmd: docker compose down
+          cmd: docker compose down --remove-orphans
           chdir: /home/cloudadmin/cloudlab-app
       register: old_compose_down
       failed_when: false
       changed_when: old_compose_down.rc == 0
 
+    - name: Stop existing Ansible-managed Docker Compose application if it exists
+      ansible.builtin.command:
+        cmd: docker compose down --remove-orphans
+        chdir: "{{ app_dir }}"
+      register: ansible_compose_down
+      failed_when: false
+      changed_when: ansible_compose_down.rc == 0
+
     - name: Remove old CloudLab API container if it exists
       ansible.builtin.command: 
         cmd: docker rm -f cloudlab-api
-      register: remove_old_api_container
+      register: remove_old_api
       failed_when: false
-      changed_when: remove_old_api_container.rc == 0
+      changed_when: remove_old_api.rc == 0
+
+    - name: Restart Docker before API deployment
+      ansible.builtin.systemd:
+        name: docker
+        state: restarted
+
+    - name: Free API port 8080 if stale process exists
+      ansible.builtin.shell: |
+        if sudo ss -lntp | grep -q ':8080'; then
+          sudo fuser -k 8080/tcp || true
+        fi
+      register: free_api_port
+      changed_when: free_api_port.rc == 0
+      failed_when: false
+
 
 
     - name: Deploy API container with Docker Compose
@@ -307,4 +330,102 @@
         rule: allow
         from_ip: "{{ api_ip }}"
         port: "5432"
+        proto: tcp
+
+
+- name: Configure monitoring stack
+  hosts: monitoring
+  become: true
+
+  vars:
+    lab_network: "192.168.0.0/24"
+    monitoring_dir: "/opt/cloudlab-monitoring"
+
+
+  tasks:
+    - name: Install Docker packages on monitoring VM
+      ansible.builtin.apt:
+        name:
+          - docker.io
+          - docker-compose-plugin
+        state: present
+        update_cache: true
+
+
+    - name: Enable and start Docker on monitoring VM
+      ansible.builtin.systemd:
+        name: docker
+        enabled: true
+        state: started
+
+    - name: Add cloudadmin user to docker group on monitoring VM
+      ansible.builtin.user:
+        name: cloudadmin
+        groups: docker
+        append: true
+
+    - name: Create monitoring directory
+      ansible.builtin.file:
+        path: "{{ monitoring_dir }}"
+        state: directory
+        owner: cloudadmin
+        group: cloudadmin
+        mode: "0755"
+
+    - name: Copy Prometheus configuration
+      ansible.builtin.copy:
+        src: ../monitoring/prometheus.yml
+        dest: "{{ monitoring_dir }}/prometheus.yml"
+        owner: cloudadmin
+        group: cloudadmin
+        mode: "0644"
+
+    - name: Copy monitoring Docker Compose file
+      ansible.builtin.copy:
+        src: ../monitoring/docker-compose.yml
+        dest: "{{ monitoring_dir }}/docker-compose.yml"
+        owner: cloudadmin
+        group: cloudadmin
+        mode: "0644"
+
+    - name: Stop existing monitoring Docker Compose stack if it exists
+      ansible.builtin.command:
+        cmd: docker compose down
+        chdir: "{{ monitoring_dir }}"
+      register: monitoring_compose_down
+      failed_when: false
+      changed_when: monitoring_compose_down.rc == 0
+
+    - name: Remove old Prometheus container if it exists
+      ansible.builtin.command:
+        cmd: docker rm -f cloudlab-prometheus
+      register: remove_old_prometheus
+      failed_when: false
+      changed_when: remove_old_prometheus.rc == 0
+
+    - name: Remove old Grafana container if it exists
+      ansible.builtin.command:
+        cmd: docker rm -f cloudlab-grafana
+      register: remove_old_grafana
+      failed_when: false
+      changed_when: remove_old_grafana.rc == 0
+
+    - name: Deploy monitoring stack with Docker Compose
+      ansible.builtin.command:
+        cmd: docker compose up -d
+        chdir: "{{ monitoring_dir }}"
+      changed_when: true
+
+    - name: Allow Prometheus from lab network
+      community.general.ufw:
+        rule: allow
+        from_ip: "{{ lab_network }}"
+        port: "9090"
+        proto: tcp
+
+    - name: Allow Grafana from lab network
+      community.general.ufw:
+        rule: allow
+        from_ip: "{{ lab_network }}"
+        port: "3000"
         proto: tcp

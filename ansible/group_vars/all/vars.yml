@@ -1,0 +1,13 @@
+---
+lab_network: "192.168.0.0/24"
+monitoring_ip: "192.168.0.113"
+
+api_ip: "192.168.0.110"
+app_ip: "192.168.0.110"
+proxy_ip: "192.168.0.111"
+db_ip: "192.168.0.112"
+
+postgres_version: "18"
+postgres_db: "cloudlab_app"
+postgres_user: "cloudlab_user"
+postgres_password: "{{ vault_postgres_password }}"
